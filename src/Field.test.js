@@ -1,309 +1,379 @@
 import React from 'react'
-import TestUtils from 'react-dom/test-utils'
+import { render, fireEvent, cleanup, act } from '@testing-library/react'
+import '@testing-library/jest-dom/extend-expect'
+import { ErrorBoundary, Toggle, wrapWith } from './testUtils'
 import Form from './ReactFinalForm'
 import Field from './Field'
 
 const onSubmitMock = values => {}
 
+const timeout = ms => new Promise(resolve => setTimeout(resolve, ms))
+async function sleep(ms) {
+  await act(async () => {
+    await timeout(ms)
+  })
+}
+
 describe('Field', () => {
+  afterEach(cleanup)
+
   it('should warn if not used inside a form', () => {
-    const spy = jest.spyOn(global.console, 'error').mockImplementation(() => {})
-    TestUtils.renderIntoDocument(<Field name="foo" component="input" />)
-    expect(spy).toHaveBeenCalled()
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(spy).toHaveBeenCalledWith(
-      'Warning: Field must be used inside of a ReactFinalForm component'
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+    const errorSpy = jest.fn()
+    render(
+      <ErrorBoundary spy={errorSpy}>
+        <Field name="name" component="input" />
+      </ErrorBoundary>
     )
-    spy.mockRestore()
+    expect(errorSpy).toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy.mock.calls[0][0].message).toBe(
+      'useField must be used inside of a <Form> component'
+    )
+    console.error.mockRestore()
   })
 
   it('should resubscribe if name changes', () => {
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    class Container extends React.Component {
-      state = { name: 'dog' }
-
-      render() {
-        return (
+    const { getByTestId, getByText } = render(
+      <Toggle>
+        {isCat => (
           <Form
             onSubmit={onSubmitMock}
             initialValues={{ dog: 'Odie', cat: 'Garfield' }}
           >
-            {() => (
-              <form>
-                <Field {...this.state} render={renderInput} />
-                <button
-                  type="button"
-                  onClick={() => this.setState({ name: 'cat' })}
-                >
-                  Switch
-                </button>
+            {({ handleSubmit }) => (
+              <form onSubmit={handleSubmit}>
+                <Field
+                  name={isCat ? 'cat' : 'dog'}
+                  component="input"
+                  data-testid="name"
+                />
               </form>
             )}
           </Form>
-        )
-      }
-    }
-    expect(renderInput).not.toHaveBeenCalled()
-    const dom = TestUtils.renderIntoDocument(<Container />)
-    expect(renderInput).toHaveBeenCalled()
-    expect(renderInput).toHaveBeenCalledTimes(1)
-    expect(renderInput.mock.calls[0][0].input.value).toBe('Odie')
-
-    const button = TestUtils.findRenderedDOMComponentWithTag(dom, 'button')
-    TestUtils.Simulate.click(button)
-
-    expect(renderInput).toHaveBeenCalledTimes(3)
-    expect(renderInput.mock.calls[2][0].input.value).toBe('Garfield')
-  })
-
-  it('should not resubscribe if name changes when not inside a <Form> (duh)', () => {
-    // This test is mainly for code coverage
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    class Container extends React.Component {
-      state = { name: 'dog' }
-
-      render() {
-        return (
-          <form>
-            <Field {...this.state} render={renderInput} />
-            <button
-              type="button"
-              onClick={() => this.setState({ name: 'cat' })}
-            >
-              Switch
-            </button>
-          </form>
-        )
-      }
-    }
-    const spy = jest.spyOn(global.console, 'error').mockImplementation(() => {})
-    expect(renderInput).not.toHaveBeenCalled()
-    const dom = TestUtils.renderIntoDocument(<Container />)
-    expect(renderInput).toHaveBeenCalled()
-    expect(renderInput).toHaveBeenCalledTimes(1)
-    expect(renderInput.mock.calls[0][0].input.value).toBe('')
-
-    const button = TestUtils.findRenderedDOMComponentWithTag(dom, 'button')
-    TestUtils.Simulate.click(button)
-
-    expect(renderInput).toHaveBeenCalledTimes(2)
-    expect(renderInput.mock.calls[1][0].input.value).toBe('')
-    expect(spy).toHaveBeenCalled()
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(spy).toHaveBeenCalledWith(
-      'Warning: Field must be used inside of a ReactFinalForm component'
+        )}
+      </Toggle>
     )
-    spy.mockRestore()
+    expect(getByTestId('name').value).toBe('Odie')
+    fireEvent.click(getByText('Toggle'))
+    expect(getByTestId('name').value).toBe('Garfield')
+    fireEvent.click(getByText('Toggle'))
+    expect(getByTestId('name').value).toBe('Odie')
   })
 
   it('should render via children render function', () => {
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo">{renderInput}</Field>
-      </form>
-    ))
-    expect(render).not.toHaveBeenCalled()
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {() => (
+          <form>
+            <Field name="name">
+              {({ input }) => <input {...input} data-testid="name" />}
+            </Field>
+          </form>
+        )}
+      </Form>
     )
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(renderInput).toHaveBeenCalled()
-    expect(renderInput).toHaveBeenCalledTimes(1)
+    expect(getByTestId('name')).toBeDefined()
+  })
+
+  it('should render via render prop function', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {() => (
+          <form>
+            <Field
+              name="name"
+              render={({ input }) => <input {...input} data-testid="name" />}
+            />
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('name')).toBeDefined()
+  })
+
+  it('should include children when rendering via render prop function', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {() => (
+          <form>
+            <Field
+              name="color"
+              render={({ input, children }) => (
+                <select {...input} data-testid="color">
+                  {children}
+                </select>
+              )}
+            >
+              <option value="red" data-testid="red">
+                Red
+              </option>
+              <option value="green" data-testid="green">
+                Green
+              </option>
+              <option value="blue" data-testid="blue">
+                Blue
+              </option>
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('color')).toBeDefined()
+    expect(getByTestId('red')).toBeDefined()
+    expect(getByTestId('green')).toBeDefined()
+    expect(getByTestId('blue')).toBeDefined()
   })
 
   it('should unsubscribe on unmount', () => {
     // This is mainly here for code coverage. 🧐
-    class Container extends React.Component {
-      state = { shown: true }
-
-      render() {
-        return (
-          <Form onSubmit={onSubmitMock}>
-            {() => (
-              <form>
-                {this.state.shown && <Field name="foo" component="input" />}
-                <button
-                  type="button"
-                  onClick={() => this.setState({ shown: false })}
-                >
-                  Unmount
-                </button>
+    const { getByText } = render(
+      <Toggle>
+        {hidden => (
+          <Form
+            onSubmit={onSubmitMock}
+            initialValues={{ dog: 'Odie', cat: 'Garfield' }}
+          >
+            {({ handleSubmit }) => (
+              <form onSubmit={handleSubmit}>
+                {!hidden && (
+                  <Field name="name" component="input" data-testid="name" />
+                )}
               </form>
             )}
           </Form>
-        )
-      }
-    }
-    const dom = TestUtils.renderIntoDocument(<Container />)
-    const button = TestUtils.findRenderedDOMComponentWithTag(dom, 'button')
-    TestUtils.Simulate.click(button)
+        )}
+      </Toggle>
+    )
+    fireEvent.click(getByText('Toggle'))
   })
 
   it('should focus, change, and blur', () => {
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} />
-      </form>
-    ))
-
-    const dom = TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{}}>
+        {() => (
+          <form>
+            <Field name="name">
+              {wrapWith(spy, ({ input }) => (
+                <input {...input} data-testid="name" />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
     )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].active).toBeUndefined()
-    expect(render.mock.calls[0][0].values.foo).toBeUndefined()
-
-    const input = TestUtils.findRenderedDOMComponentWithTag(dom, 'input')
-    TestUtils.Simulate.focus(input)
-
-    expect(render).toHaveBeenCalledTimes(2)
-    expect(render.mock.calls[1][0].active).toBe('foo')
-    expect(render.mock.calls[1][0].values.foo).toBeUndefined()
-
-    TestUtils.Simulate.change(input, { target: { value: 'bar' } })
-
-    expect(render).toHaveBeenCalledTimes(3)
-    expect(render.mock.calls[2][0].active).toBe('foo')
-    expect(render.mock.calls[2][0].values.foo).toBe('bar')
-
-    TestUtils.Simulate.blur(input)
-
-    expect(render).toHaveBeenCalledTimes(4)
-    expect(render.mock.calls[3][0].active).toBeUndefined()
-    expect(render.mock.calls[3][0].values.foo).toBe('bar')
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].meta.active).toBe(false)
+    expect(spy.mock.calls[0][0].input.value).toBe('')
+    fireEvent.focus(getByTestId('name'))
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].meta.active).toBe(true)
+    expect(spy.mock.calls[1][0].input.value).toBe('')
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy.mock.calls[2][0].meta.active).toBe(true)
+    expect(spy.mock.calls[2][0].input.value).toBe('erikras')
+    fireEvent.blur(getByTestId('name'))
+    expect(spy).toHaveBeenCalledTimes(4)
+    expect(spy.mock.calls[3][0].meta.active).toBe(false)
+    expect(spy.mock.calls[3][0].input.value).toBe('erikras')
   })
 
   it("should convert '' to undefined on change", () => {
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} />
-      </form>
-    ))
-
-    const dom = TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {wrapWith(spy, () => (
+          <form>
+            <Field name="name" component="input" data-testid="name" />
+          </form>
+        ))}
+      </Form>
     )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBeUndefined()
-
-    const input = TestUtils.findRenderedDOMComponentWithTag(dom, 'input')
-
-    TestUtils.Simulate.change(input, { target: { value: 'bar' } })
-
-    expect(render).toHaveBeenCalledTimes(2)
-    expect(render.mock.calls[1][0].values.foo).toBe('bar')
-
-    TestUtils.Simulate.change(input, { target: { value: '' } })
-
-    expect(render).toHaveBeenCalledTimes(3)
-    expect(render.mock.calls[2][0].values.foo).toBeUndefined()
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].values).toEqual({})
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].values).toEqual({ name: 'erikras' })
+    fireEvent.change(getByTestId('name'), { target: { value: '' } })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy.mock.calls[2][0].values).toEqual({})
   })
 
-  it('should accept a null parse prop to preserve empty strings', () => {
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} parse={null} />
-      </form>
-    ))
-
-    const dom = TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
+  it('should accept an identity parse prop to preserve empty strings', () => {
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {wrapWith(spy, () => (
+          <form>
+            <Field name="name" parse={v => v}>
+              {({ input: { value, ...props } }) => (
+                <input
+                  {...props}
+                  value={value === null ? '' : value}
+                  data-testid="name"
+                />
+              )}
+            </Field>
+          </form>
+        ))}
+      </Form>
     )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBeUndefined()
-
-    const input = TestUtils.findRenderedDOMComponentWithTag(dom, 'input')
-
-    TestUtils.Simulate.change(input, { target: { value: '' } })
-
-    expect(render).toHaveBeenCalledTimes(2)
-    expect(render.mock.calls[1][0].values.foo).toBe('')
-
-    TestUtils.Simulate.change(input, { target: { value: 'abc' } })
-
-    expect(render).toHaveBeenCalledTimes(3)
-    expect(render.mock.calls[2][0].values.foo).toBe('abc')
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].values).toEqual({})
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].values).toEqual({ name: 'erikras' })
+    fireEvent.change(getByTestId('name'), { target: { value: '' } })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy.mock.calls[2][0].values).toEqual({ name: '' })
   })
 
   it('should accept a format function prop', () => {
-    const format = jest.fn((value, name) => `format.${value}`)
-    const renderInput = jest.fn(({ input }) => <input {...input} />)
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} format={format} />
-      </form>
-    ))
-
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {wrapWith(spy, () => (
+          <form>
+            <Field
+              name="name"
+              component="input"
+              format={value => (value ? value.toUpperCase() : '')}
+              data-testid="name"
+            />
+          </form>
+        ))}
+      </Form>
     )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBeUndefined()
-
-    expect(format).toHaveBeenCalled()
-    expect(format).toHaveBeenCalledTimes(1)
-    expect(format.mock.calls[0]).toEqual([undefined, 'foo'])
-
-    expect(renderInput).toHaveBeenCalled()
-    expect(renderInput).toHaveBeenCalledTimes(1)
-    expect(renderInput.mock.calls[0][0].input.value).toBe('format.undefined')
-
-    renderInput.mock.calls[0][0].input.onChange('bar')
-
-    expect(format).toHaveBeenCalledTimes(3)
-    expect(format.mock.calls[2]).toEqual(['bar', 'foo'])
-
-    expect(renderInput).toHaveBeenCalledTimes(3)
-    expect(renderInput.mock.calls[2][0].input.value).toBe('format.bar')
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].values).toEqual({})
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].values).toEqual({ name: 'erikras' })
+    expect(getByTestId('name').value).toBe('ERIKRAS')
   })
 
-  it('should accept a null format prop to preserve undefined values', () => {
-    const renderInput = jest.fn(({ input }) => (
-      <input {...input} value={input.value || ''} />
-    ))
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} format={null} />
-      </form>
-    ))
-
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
+  it('should only format on blur if formatOnBlur is true', () => {
+    const format = jest.fn(value => (value ? value.toUpperCase() : ''))
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {() => (
+          <form>
+            <Field
+              name="name"
+              component="input"
+              format={format}
+              formatOnBlur
+              data-testid="name"
+            />
+          </form>
+        )}
+      </Form>
     )
+    fireEvent.focus(getByTestId('name'))
+    expect(getByTestId('name').value).toBe('')
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(getByTestId('name').value).toBe('erikras')
+    expect(format).not.toHaveBeenCalled()
+    fireEvent.blur(getByTestId('name'))
+    expect(format).toHaveBeenCalled()
+    expect(format).toHaveBeenCalledTimes(1)
+    expect(getByTestId('name').value).toBe('ERIKRAS')
+  })
 
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBeUndefined()
+  it('should `formatOnBlur` most updated value', () => {
+    const format = jest.fn(value => (value ? value.trim() : ''))
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {() => (
+          <form>
+            <Field name="name" format={format} formatOnBlur initialValue="">
+              {({ input }) => (
+                <input
+                  {...input}
+                  data-testid="name"
+                  onBlur={e => {
+                    input.onChange(
+                      e.target.value && e.target.value.toUpperCase()
+                    )
+                    input.onBlur(e)
+                  }}
+                />
+              )}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    const inputText = '   erikras'
+    fireEvent.focus(getByTestId('name'))
+    expect(getByTestId('name').value).toBe('')
+    fireEvent.change(getByTestId('name'), { target: { value: inputText } })
+    expect(getByTestId('name').value).toBe(inputText)
+    fireEvent.blur(getByTestId('name'))
+    expect(format.mock.calls[0][0]).toBe(inputText.toUpperCase())
+    expect(getByTestId('name').value).toBe(inputText.trim().toUpperCase())
+  })
 
-    expect(renderInput).toHaveBeenCalled()
-    expect(renderInput).toHaveBeenCalledTimes(1)
-    expect(renderInput.mock.calls[0][0].input.value).toBeUndefined()
+  it('should not format value at all when formatOnBlur and render prop', () => {
+    const format = jest.fn(value => (value ? value.toUpperCase() : ''))
+    render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {() => (
+          <form>
+            <Field name="name" format={format} formatOnBlur data-testid="name">
+              {({ input }) => {
+                expect(input.value).toBeUndefined()
+                expect(format).not.toHaveBeenCalled()
+                return <input {...input} value={input.value || ''} />
+              }}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+  })
 
-    renderInput.mock.calls[0][0].input.onChange('bar')
-
-    expect(renderInput).toHaveBeenCalledTimes(3)
-    expect(renderInput.mock.calls[2][0].input.value).toBe('bar')
+  it('should accept an identity format prop to preserve undefined values', () => {
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {() => (
+          <form>
+            <Field name="name" format={v => v}>
+              {wrapWith(spy, ({ input: { value, ...props } }) => (
+                <input
+                  {...props}
+                  value={value === undefined ? '' : value}
+                  data-testid="name"
+                />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].input.value).toBeUndefined()
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].input.value).toBe('erikras')
+    fireEvent.change(getByTestId('name'), { target: { value: '' } })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy.mock.calls[2][0].input.value).toBeUndefined()
   })
 
   it('should provide a value of [] when empty on a select multiple', () => {
-    const dom = TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock}>
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
         {() => (
           <form>
-            <Field name="foo" component="select" multiple />
+            <Field name="name" component="select" multiple data-testid="name" />
           </form>
         )}
       </Form>
@@ -311,400 +381,592 @@ describe('Field', () => {
 
     // This test is mostly for code coverage. Is there a way to assure that the value prop
     // passed to the <select> is []?
-    const select = TestUtils.findRenderedDOMComponentWithTag(dom, 'select')
-    expect(select.value).toBe('')
+    expect(getByTestId('name').value).toBe('')
   })
 
-  it("should convert undefined values to ''", () => {
-    const renderInput = jest.fn(({ input }) => (
-      <input {...input} value={input.value} />
-    ))
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} />
-      </form>
-    ))
-
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
-    )
-
-    expect(renderInput).toHaveBeenCalled()
-    expect(renderInput).toHaveBeenCalledTimes(1)
-    expect(renderInput.mock.calls[0][0].input.value).toBe('')
-
-    renderInput.mock.calls[0][0].input.onChange('bar')
-
-    expect(renderInput).toHaveBeenCalledTimes(3)
-    expect(renderInput.mock.calls[2][0].input.value).toBe('bar')
-
-    renderInput.mock.calls[1][0].input.onChange(null)
-
-    expect(renderInput).toHaveBeenCalledTimes(5)
-    expect(renderInput.mock.calls[4][0].input.value).toBe('')
-  })
-
-  it('should optionally allow null values', () => {
-    const renderInput = jest.fn(({ input }) => (
-      <input
-        {...input}
-        value={input.value || "we don't REALLY want null. lol!"}
-      />
-    ))
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" render={renderInput} allowNull />
-      </form>
-    ))
-
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} render={render} />
-    )
-
-    expect(render).toHaveBeenCalled()
-    // called twice due to field registration adding touched and visited values
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBeUndefined()
-
-    renderInput.mock.calls[0][0].input.onChange('bar')
-
-    expect(render).toHaveBeenCalledTimes(2)
-    expect(render.mock.calls[1][0].values.foo).toBe('bar')
-
-    renderInput.mock.calls[0][0].input.onChange(null)
-
-    expect(render).toHaveBeenCalledTimes(3)
-    expect(render.mock.calls[2][0].values.foo).toBe(null)
-  })
-
-  it('should not let validate prop bleed through', () => {
-    const input = jest.fn(({ input }) => <input {...input} />)
-    const required = value => (value ? undefined : 'Required')
-
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock}>
-        {() => (
-          <form>
-            <Field name="foo" render={input} validate={required} />
-          </form>
-        )}
-      </Form>
-    )
-
-    expect(input).toHaveBeenCalled()
-    // called twice due to field registration adding touched and visited values
-    expect(input).toHaveBeenCalledTimes(2)
-    expect(input.mock.calls[1][0].validate).toBeUndefined()
-  })
-
-  it('should not let subscription prop bleed through', () => {
-    const input = jest.fn(({ input }) => <input {...input} />)
-
-    TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock}>
-        {() => (
-          <form>
-            <Field name="foo" render={input} subscription={{ active: true }} />
-          </form>
-        )}
-      </Form>
-    )
-
-    expect(input).toHaveBeenCalled()
-    // called twice due to field registration adding touched and visited values
-    expect(input).toHaveBeenCalledTimes(1)
-    expect(input.mock.calls[0][0].subscription).toBeUndefined()
-  })
-
-  it('should allow changing field-level validation function', () => {
-    const input = jest.fn(({ input }) => <input {...input} />)
-    const required = value => (value ? undefined : 'Required')
-    const requiredUppercase = value =>
-      !value
-        ? 'Required'
-        : value.toUpperCase() === value
-          ? undefined
-          : 'Must be uppercase'
-    class FieldsContainer extends React.Component {
-      state = { uppercase: false }
-
-      render() {
-        return (
-          <form>
-            <Field
-              name="foo"
-              render={input}
-              validate={this.state.uppercase ? requiredUppercase : required}
-            />
-            <button
-              type="button"
-              onClick={() => this.setState({ uppercase: true })}
-            >
-              Require Uppercase
-            </button>
-          </form>
-        )
-      }
-    }
-
-    const dom = TestUtils.renderIntoDocument(
-      <Form onSubmit={onSubmitMock} component={FieldsContainer} />
-    )
-
-    expect(input).toHaveBeenCalled()
-    // called twice due to field registration adding touched and visited values
-    expect(input).toHaveBeenCalledTimes(2)
-    expect(input.mock.calls[1][0].meta.error).toBe('Required')
-
-    const {
-      input: { onChange }
-    } = input.mock.calls[1][0]
-
-    onChange('hi')
-
-    // valid now
-    expect(input).toHaveBeenCalledTimes(4)
-    expect(input.mock.calls[3][0].meta.error).toBeUndefined()
-
-    // toggle rules
-    const button = TestUtils.findRenderedDOMComponentWithTag(dom, 'button')
-    TestUtils.Simulate.click(button)
-
-    // props changed, but still valid. doesn't update until next time validation is run
-    expect(input).toHaveBeenCalledTimes(5)
-    expect(input.mock.calls[4][0].meta.error).toBeUndefined()
-
-    onChange('his')
-
-    // invalid now
-    expect(input).toHaveBeenCalledTimes(7)
-    expect(input.mock.calls[6][0].meta.error).toBe('Must be uppercase')
-  })
-
-  it('should render checkboxes with checked prop', () => {
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" component="input" type="checkbox" />
-      </form>
-    ))
-
-    const dom = TestUtils.renderIntoDocument(
+  it('should pass multiple through to custom components', () => {
+    const CustomSelect = jest.fn(({ input }) => <select {...input} />)
+    render(
       <Form
         onSubmit={onSubmitMock}
-        render={render}
-        initialValues={{ foo: true }}
-      />
-    )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBe(true)
-
-    const input = TestUtils.findRenderedDOMComponentWithTag(dom, 'input')
-    expect(input.checked).toBe(true)
-  })
-
-  it('should render "array" checkboxes with checked prop when value is included in array', () => {
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" component="input" type="checkbox" value="a" />
-        <Field name="foo" component="input" type="checkbox" value="d" />
-      </form>
-    ))
-
-    const dom = TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        render={render}
-        initialValues={{ foo: ['a', 'b', 'c'] }}
-      />
-    )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toEqual(['a', 'b', 'c'])
-
-    const inputs = TestUtils.scryRenderedDOMComponentsWithTag(dom, 'input')
-    expect(inputs[0].checked).toBe(true)
-    expect(inputs[1].checked).toBe(false)
-  })
-
-  it('should render "array" custom checkboxes with checked prop when value is included in array', () => {
-    const checkboxA = jest.fn(({ input }) => <input {...input} />)
-    const checkboxD = jest.fn(({ input }) => <input {...input} />)
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" component={checkboxA} type="checkbox" value="a" />
-        <Field name="foo" component={checkboxD} type="checkbox" value="d" />
-      </form>
-    ))
-
-    TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        render={render}
-        initialValues={{ foo: ['a', 'b', 'c'] }}
-      />
-    )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toEqual(['a', 'b', 'c'])
-
-    expect(checkboxA).toHaveBeenCalled()
-    expect(checkboxA).toHaveBeenCalledTimes(1)
-    expect(checkboxA.mock.calls[0][0].input.checked).toBe(true)
-
-    expect(checkboxD).toHaveBeenCalled()
-    expect(checkboxD).toHaveBeenCalledTimes(1)
-    expect(checkboxD.mock.calls[0][0].input.checked).toBe(false)
-  })
-
-  it('should render radio buttons with checked prop', () => {
-    const render = jest.fn(() => (
-      <form>
-        <Field name="foo" component="input" type="radio" value="Bar" />
-        <Field name="foo" component="input" type="radio" value="Baz" />
-      </form>
-    ))
-
-    const dom = TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        render={render}
-        initialValues={{ foo: 'Bar' }}
-      />
-    )
-
-    expect(render).toHaveBeenCalled()
-    expect(render).toHaveBeenCalledTimes(1)
-    expect(render.mock.calls[0][0].values.foo).toBe('Bar')
-
-    const [barInput, bazInput] = TestUtils.scryRenderedDOMComponentsWithTag(
-      dom,
-      'input'
-    )
-
-    expect(barInput.checked).toBe(true)
-    expect(bazInput.checked).toBe(false)
-
-    render.mock.calls[0][0].form.change('foo', 'Baz')
-
-    expect(barInput.checked).toBe(false)
-    expect(bazInput.checked).toBe(true)
-  })
-
-  it('should render custom radio component with checked prop', () => {
-    const Radio = jest.fn(() => null)
-    TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        render={() => (
-          <form>
-            <Field name="foo" type="radio" value="yes" component={Radio} />
-          </form>
-        )}
-        initialValues={{ foo: 'yes' }}
-      />
-    )
-    expect(Radio.mock.calls[0][0]).toMatchObject({ input: { checked: true } })
-  })
-
-  it('should render custom checkbox component with checked prop', () => {
-    const Checkbox = jest.fn(() => null)
-    TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        render={() => (
-          <form>
-            <Field name="foo" type="checkbox" component={Checkbox} />
-          </form>
-        )}
-        initialValues={{ foo: true }}
-      />
-    )
-    expect(Checkbox.mock.calls[0][0]).toMatchObject({
-      input: { checked: true }
-    })
-  })
-
-  it('should use isEqual to calculate dirty/pristine', () => {
-    const input = jest.fn(({ input }) => <input {...input} />)
-
-    TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        initialValues={{ foo: 'Bar' }}
-        subscription={{ pristine: true }}
+        initialValues={{ name: [] }}
+        subscription={{ values: true }}
       >
         {() => (
           <form>
-            <Field
-              name="foo"
-              render={input}
-              isEqual={(a, b) =>
-                (a && a.toUpperCase()) === (b && b.toUpperCase())
-              }
-            />
+            <Field name="name" component={CustomSelect} multiple />
           </form>
         )}
       </Form>
     )
 
-    expect(input).toHaveBeenCalled()
-    expect(input).toHaveBeenCalledTimes(1)
-    expect(input.mock.calls[0][0].meta.dirty).toBe(false)
-    expect(input.mock.calls[0][0].meta.pristine).toBe(true)
+    expect(CustomSelect).toHaveBeenCalled()
+    expect(CustomSelect).toHaveBeenCalledTimes(1)
+    expect(CustomSelect.mock.calls[0][0].input.multiple).toBe(true)
+  })
 
-    input.mock.calls[0][0].input.onChange('BAR')
+  it('should pass ref through to the input', () => {
+    const ref = React.createRef()
+    render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {() => (
+          <form>
+            <Field name="name" component="input" ref={ref} />
+          </form>
+        )}
+      </Form>
+    )
 
-    expect(input).toHaveBeenCalledTimes(2)
-    expect(input.mock.calls[1][0].meta.dirty).toBe(false)
-    expect(input.mock.calls[1][0].meta.pristine).toBe(true)
+    expect(ref.current).not.toBe(null)
+    expect(ref.current instanceof HTMLInputElement).toBe(true)
+  })
 
-    input.mock.calls[0][0].input.onChange('BARK')
+  it('should not pass an undefined type through to the input', () => {
+    const MyInput = jest.fn(({ input }) => <input {...input} />)
+    render(
+      <Form onSubmit={onSubmitMock} subscription={{ values: true }}>
+        {() => (
+          <form>
+            <Field name="name" component={MyInput} multiple />
+          </form>
+        )}
+      </Form>
+    )
 
-    expect(input).toHaveBeenCalledTimes(4) // once for form and once for field
-    expect(input.mock.calls[3][0].meta.dirty).toBe(true)
-    expect(input.mock.calls[3][0].meta.pristine).toBe(false)
+    expect(MyInput).toHaveBeenCalled()
+    expect(MyInput).toHaveBeenCalledTimes(1)
+    expect(MyInput.mock.calls[0][0].input).not.toHaveProperty('type')
+  })
 
-    input.mock.calls[0][0].input.onChange('baR')
+  it('should optionally allow null values', () => {
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form
+        onSubmit={onSubmitMock}
+        initialValues={{ name: null }}
+        subscription={{ values: true }}
+      >
+        {() => (
+          <form>
+            <Field name="name" allowNull>
+              {wrapWith(spy, ({ input: { value, ...props } }) => (
+                <input
+                  {...props}
+                  value={value === null ? '' : value}
+                  data-testid="name"
+                />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].input.value).toBe(null)
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].input.value).toBe('erikras')
+    act(() => {
+      spy.mock.calls[1][0].input.onChange(null)
+    })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy.mock.calls[2][0].input.value).toBe(null)
+  })
 
-    expect(input).toHaveBeenCalledTimes(6) // once for form and once for field
-    expect(input.mock.calls[5][0].meta.dirty).toBe(false)
-    expect(input.mock.calls[5][0].meta.pristine).toBe(true)
+  it('should not allow null values when allowNull not true', () => {
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form
+        onSubmit={onSubmitMock}
+        initialValues={{ name: null }}
+        subscription={{ values: true }}
+      >
+        {() => (
+          <form>
+            <Field name="name">
+              {wrapWith(spy, ({ input: { value, ...props } }) => (
+                <input
+                  {...props}
+                  value={value === null ? '' : value}
+                  data-testid="name"
+                />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].input.value).toBe('')
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1][0].input.value).toBe('erikras')
+    act(() => {
+      spy.mock.calls[1][0].input.onChange(null)
+    })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy.mock.calls[2][0].input.value).toBe('')
+  })
+
+  it('should not let validate prop bleed through', () => {
+    const spy = jest.fn()
+    render(
+      <Form onSubmit={onSubmitMock} subscription={{}}>
+        {() => (
+          <form>
+            <Field name="name">
+              {wrapWith(spy, ({ input }) => (
+                <input {...input} data-testid="name" />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].validate).toBeUndefined()
+  })
+
+  it('should not let subscription prop bleed through', () => {
+    const spy = jest.fn()
+    render(
+      <Form onSubmit={onSubmitMock} subscription={{}}>
+        {() => (
+          <form>
+            <Field name="name" subscription={{ value: true }}>
+              {wrapWith(spy, ({ input }) => (
+                <input {...input} data-testid="name" />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(spy).toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0][0].subscription).toBeUndefined()
+  })
+
+  it('should allow changing field-level validation function', () => {
+    const simpleValidate = value => (value ? undefined : 'Required')
+    const complexValidate = value => {
+      if (value) {
+        if (value !== value.toUpperCase()) {
+          return 'SHOULD BE UPPERCASE!'
+        }
+      } else {
+        return 'Required'
+      }
+    }
+    const { getByTestId, getByText } = render(
+      <Toggle>
+        {useComplexValidation => (
+          <Form onSubmit={onSubmitMock}>
+            {({ handleSubmit }) => (
+              <form onSubmit={handleSubmit}>
+                <Field
+                  name="name"
+                  validate={
+                    useComplexValidation ? complexValidate : simpleValidate
+                  }
+                  key={useComplexValidation ? 1 : 0}
+                >
+                  {({ input, meta }) => (
+                    <div>
+                      <input {...input} data-testid="name" />
+                      <div data-testid="error">{meta.error}</div>
+                    </div>
+                  )}
+                </Field>
+              </form>
+            )}
+          </Form>
+        )}
+      </Toggle>
+    )
+    expect(getByTestId('error')).toHaveTextContent('Required')
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(getByTestId('error')).toHaveTextContent('')
+    fireEvent.click(getByText('Toggle'))
+    expect(getByTestId('error')).toHaveTextContent('SHOULD BE UPPERCASE!')
+    fireEvent.change(getByTestId('name'), { target: { value: 'ERIKRAS' } })
+    expect(getByTestId('error')).toHaveTextContent('')
+  })
+
+  /**
+   * Allow me to explain this. If we allow field level validation functions
+   * to be swapped, it means that we'd have to run _ALL_ the validation
+   * every time a new field was removed regardless of whether or
+   * not it was using field-level validation. To avoid this overhead, we must
+   * accept some inconsistency when swapping of field-level validation functions.
+   * In this test, swapping from no validation to "required" validation
+   * does work because the field-level validation function is called on mount,
+   * but the error does not clear when we switch back to no validation function
+   * because in order for Final Form to determine if the 'Required' error came
+   * from the newly unmounted Field, it would need to run validation on the entire
+   * form.
+   */
+  it('should ignore changes field-level validation function', () => {
+    const createValidator = isRequired =>
+      isRequired ? value => (value ? undefined : 'Required') : undefined
+
+    const Error = ({ name }) => (
+      <Field name={name} subscription={{ error: true }}>
+        {({ meta: { error } }) => <div data-testid="error2">{error}</div>}
+      </Field>
+    )
+    const { getByTestId, getByText } = render(
+      <Toggle>
+        {isRequired => (
+          <Form onSubmit={onSubmitMock}>
+            {({ handleSubmit }) => (
+              <form onSubmit={handleSubmit}>
+                <Field
+                  name="name"
+                  validate={createValidator(isRequired)}
+                  key={isRequired ? 1 : 0}
+                >
+                  {({ input, meta }) => (
+                    <div>
+                      <input {...input} data-testid="name" />
+                      <div data-testid="error">{meta.error}</div>
+                    </div>
+                  )}
+                </Field>
+                <Error name="name" />
+              </form>
+            )}
+          </Form>
+        )}
+      </Toggle>
+    )
+    expect(getByTestId('error')).toBeEmptyDOMElement()
+    expect(getByTestId('error2')).toBeEmptyDOMElement()
+    fireEvent.click(getByText('Toggle'))
+    expect(getByTestId('error')).toHaveTextContent('Required')
+    expect(getByTestId('error2')).toHaveTextContent('Required')
+    fireEvent.click(getByText('Toggle'))
+    // ERROR IS NOT CLEARED (see comment above)
+    expect(getByTestId('error')).toHaveTextContent('Required')
+    expect(getByTestId('error2')).toHaveTextContent('Required')
+  })
+
+  it('should not rerender if validateFields is !== every time', () => {
+    // https://github.com/final-form/react-final-form/issues/502
+    const required = value => (value ? undefined : 'Required')
+    const spy = jest.fn()
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field name="name" validate={required} validateFields={[]}>
+              {wrapWith(spy, ({ input, meta }) => (
+                <div>
+                  <input {...input} data-testid="name" />
+                  <div data-testid="error">{meta.error}</div>
+                </div>
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    // first render registered validation, second contains error
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(getByTestId('error')).toHaveTextContent('Required')
+  })
+
+  it('should pass along type prop', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="checkbox"
+              component="input"
+              type="checkbox"
+              data-testid="checkbox"
+            />
+            <Field
+              name="password"
+              component="input"
+              type="password"
+              data-testid="password"
+            />
+            <Field
+              name="radio"
+              component="input"
+              type="radio"
+              data-testid="radio"
+            />
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('checkbox').type).toBe('checkbox')
+    expect(getByTestId('password').type).toBe('password')
+    expect(getByTestId('radio').type).toBe('radio')
+  })
+
+  it('should render checkboxes with checked prop', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="employed"
+              component="input"
+              type="checkbox"
+              data-testid="employed"
+            />
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('employed').type).toBe('checkbox')
+    expect(getByTestId('employed').checked).toBe(false)
+    fireEvent.change(getByTestId('employed'), { target: { checked: true } })
+    expect(getByTestId('employed').checked).toBe(true)
+  })
+
+  it('should render "array" checkboxes with checked prop when value is included in array', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} initialValues={{ colors: ['red', 'blue'] }}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="colors"
+              component="input"
+              type="checkbox"
+              value="red"
+              data-testid="red"
+            />
+            <Field
+              name="colors"
+              component="input"
+              type="checkbox"
+              value="green"
+              data-testid="green"
+            />
+            <Field
+              name="colors"
+              component="input"
+              type="checkbox"
+              value="blue"
+              data-testid="blue"
+            />
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('red').checked).toBe(true)
+    expect(getByTestId('green').checked).toBe(false)
+    expect(getByTestId('blue').checked).toBe(true)
+  })
+
+  it('should render "array" custom checkboxes with checked prop when value is included in array', () => {
+    const red = jest.fn()
+    const green = jest.fn()
+    const blue = jest.fn()
+    render(
+      <Form onSubmit={onSubmitMock} initialValues={{ colors: ['red', 'blue'] }}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field name="colors" type="checkbox" value="red">
+              {wrapWith(red, ({ input }) => (
+                <input {...input} />
+              ))}
+            </Field>
+            <Field name="colors" type="checkbox" value="green">
+              {wrapWith(green, ({ input }) => (
+                <input {...input} />
+              ))}
+            </Field>
+            <Field name="colors" type="checkbox" value="blue">
+              {wrapWith(blue, ({ input }) => (
+                <input {...input} />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    // All forms without restricted subscriptions render twice at first because they
+    // need to update their validation and touched/modified/visited maps every time
+    // new fields are registered.
+    expect(red).toHaveBeenCalled()
+    expect(red).toHaveBeenCalledTimes(2)
+    expect(red.mock.calls[0][0].input.checked).toBe(true)
+    expect(red.mock.calls[1][0].input.checked).toBe(true)
+    expect(green).toHaveBeenCalled()
+    expect(green).toHaveBeenCalledTimes(2)
+    expect(green.mock.calls[0][0].input.checked).toBe(false)
+    expect(green.mock.calls[1][0].input.checked).toBe(false)
+    expect(blue).toHaveBeenCalled()
+    expect(blue).toHaveBeenCalledTimes(2)
+    expect(blue.mock.calls[0][0].input.checked).toBe(true)
+    expect(blue.mock.calls[1][0].input.checked).toBe(true)
+  })
+
+  it('should render radio buttons with checked prop', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} initialValues={{ color: 'green' }}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="color"
+              component="input"
+              type="radio"
+              value="red"
+              data-testid="red"
+            />
+            <Field
+              name="color"
+              component="input"
+              type="radio"
+              value="green"
+              data-testid="green"
+            />
+            <Field
+              name="color"
+              component="input"
+              type="radio"
+              value="blue"
+              data-testid="blue"
+            />
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('red').type).toBe('radio')
+    expect(getByTestId('red').checked).toBe(false)
+    expect(getByTestId('green').type).toBe('radio')
+    expect(getByTestId('green').checked).toBe(true)
+    expect(getByTestId('blue').type).toBe('radio')
+    expect(getByTestId('blue').checked).toBe(false)
+  })
+
+  it('should render custom radio component with checked prop', () => {
+    const red = jest.fn()
+    const green = jest.fn()
+    const blue = jest.fn()
+    render(
+      <Form onSubmit={onSubmitMock} initialValues={{ color: 'green' }}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field name="color" type="radio" value="red">
+              {wrapWith(red, ({ input }) => (
+                <input {...input} />
+              ))}
+            </Field>
+            <Field name="color" type="radio" value="green">
+              {wrapWith(green, ({ input }) => (
+                <input {...input} />
+              ))}
+            </Field>
+            <Field name="color" type="radio" value="blue">
+              {wrapWith(blue, ({ input }) => (
+                <input {...input} />
+              ))}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    // All forms without restricted subscriptions render twice at first because they
+    // need to update their validation and touched/modified/visited maps every time
+    // new fields are registered.
+    expect(red).toHaveBeenCalled()
+    expect(red).toHaveBeenCalledTimes(2)
+    expect(red.mock.calls[0][0].input.checked).toBe(false)
+    expect(red.mock.calls[1][0].input.checked).toBe(false)
+    expect(green).toHaveBeenCalled()
+    expect(green).toHaveBeenCalledTimes(2)
+    expect(green.mock.calls[0][0].input.checked).toBe(true)
+    expect(green.mock.calls[1][0].input.checked).toBe(true)
+    expect(blue).toHaveBeenCalled()
+    expect(blue).toHaveBeenCalledTimes(2)
+    expect(blue.mock.calls[0][0].input.checked).toBe(false)
+    expect(blue.mock.calls[1][0].input.checked).toBe(false)
+  })
+
+  it('should use isEqual to calculate dirty/pristine', () => {
+    const isEqual = (a, b) => (a && a.toUpperCase()) === (b && b.toUpperCase())
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} initialValues={{ name: 'bob' }}>
+        {() => (
+          <form>
+            <Field name="name" isEqual={isEqual}>
+              {({ input, meta }) => (
+                <div>
+                  <div data-testid="dirty">
+                    {meta.dirty ? 'Dirty' : 'Pristine'}
+                  </div>
+                  <input {...input} data-testid="input" />
+                </div>
+              )}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('input').value).toBe('bob')
+    expect(getByTestId('dirty')).toHaveTextContent('Pristine')
+    fireEvent.change(getByTestId('input'), { target: { value: 'bobby' } })
+    expect(getByTestId('dirty')).toHaveTextContent('Dirty')
+    fireEvent.change(getByTestId('input'), { target: { value: 'BOB' } })
+    expect(getByTestId('dirty')).toHaveTextContent('Pristine')
+  })
+
+  it('should be able to use inline isEqual to calculate dirty/pristine without falling into infinite rerender loop', () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} initialValues={{ name: 'bob' }}>
+        {() => (
+          <form>
+            <Field
+              name="name"
+              isEqual={(a, b) =>
+                (a && a.toUpperCase()) === (b && b.toUpperCase())
+              }
+            >
+              {({ input, meta }) => (
+                <div>
+                  <div data-testid="dirty">
+                    {meta.dirty ? 'Dirty' : 'Pristine'}
+                  </div>
+                  <input {...input} data-testid="input" />
+                </div>
+              )}
+            </Field>
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('input').value).toBe('bob')
+    expect(getByTestId('dirty')).toHaveTextContent('Pristine')
+    fireEvent.change(getByTestId('input'), { target: { value: 'bobby' } })
+    expect(getByTestId('dirty')).toHaveTextContent('Dirty')
+    fireEvent.change(getByTestId('input'), { target: { value: 'BOB' } })
+    expect(getByTestId('dirty')).toHaveTextContent('Pristine')
   })
 
   it('should only call each field-level validation once upon initial mount', () => {
     const fooValidate = jest.fn()
     const barValidate = jest.fn()
     const bazValidate = jest.fn()
-    TestUtils.renderIntoDocument(
-      <Form
-        onSubmit={onSubmitMock}
-        render={() => (
+    render(
+      <Form onSubmit={onSubmitMock}>
+        {() => (
           <form>
-            <Field
-              name="foo"
-              component="input"
-              type="text"
-              validate={fooValidate}
-            />
-            <Field
-              name="bar"
-              component="input"
-              type="text"
-              validate={barValidate}
-            />
-            <Field
-              name="baz"
-              component="input"
-              type="text"
-              validate={bazValidate}
-            />
+            <Field name="foo" component="input" validate={fooValidate} />
+            <Field name="bar" component="input" validate={barValidate} />
+            <Field name="baz" component="input" validate={bazValidate} />
           </form>
         )}
-      />
+      </Form>
     )
     expect(fooValidate).toHaveBeenCalledTimes(1)
     expect(barValidate).toHaveBeenCalledTimes(1)
@@ -712,66 +974,278 @@ describe('Field', () => {
   })
 
   it('should warn when used without type prop and rendering radio, checkbox or multiple select indirectly', () => {
-    class Container extends React.Component {
-      render() {
-        return (
-          <Form initialValues={{ select_test: [] }} onSubmit={() => {}}>
-            {() => (
-              <div>
-                <Field name="checkbox_test" value="checkbox_value">
-                  {({ input }) => <input type="checkbox" {...input} />}
-                </Field>
-                <Field name="radio_test" value="radio_value">
-                  {({ input }) => <input type="radio" {...input} />}
-                </Field>
-                <Field name="select_test">
-                  {({ input }) => (
-                    <select multiple {...input}>
-                      <option>{'Option'}</option>
-                    </select>
-                  )}
-                </Field>
-              </div>
-            )}
-          </Form>
-        )
-      }
-    }
-
-    const spy = jest.spyOn(global.console, 'error').mockImplementation(() => {})
-    const dom = TestUtils.renderIntoDocument(<Container />)
-
-    const [checkbox, radio] = TestUtils.scryRenderedDOMComponentsWithTag(
-      dom,
-      'input'
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock} initialValues={{ selectMultipleInput: [] }}>
+        {() => (
+          <form>
+            <Field name="checkboxInput" value="checkboxValue">
+              {({ input }) => (
+                <input type="checkbox" {...input} data-testid="checkbox" />
+              )}
+            </Field>
+            <Field name="radioInput" value="radioValue">
+              {({ input }) => (
+                <input type="radio" {...input} data-testid="radio" />
+              )}
+            </Field>
+            <Field name="selectMultipleInput">
+              {({ input }) => (
+                <select multiple {...input} data-testid="select">
+                  <option>{'Option'}</option>
+                </select>
+              )}
+            </Field>
+            <Field
+              name="selectMultipleWithoutRenderProp"
+              component="select"
+              data-testid="selectMultipleWithoutRenderProp"
+              multiple
+            >
+              <option>{'Option'}</option>
+            </Field>
+          </form>
+        )}
+      </Form>
     )
-    const [select] = TestUtils.scryRenderedDOMComponentsWithTag(dom, 'select')
 
-    TestUtils.Simulate.change(checkbox, {
-      target: { type: 'checkbox', value: 'checkbox_value' }
+    expect(errorSpy).not.toHaveBeenCalled()
+    fireEvent.click(getByTestId('checkbox'), {
+      target: { type: 'checkbox', checked: true }
     })
-    TestUtils.Simulate.change(radio, {
-      target: { type: 'radio', value: 'radio_value' }
-    })
-    TestUtils.Simulate.change(select, {
-      target: { type: 'select-multiple', value: ['select_value'] }
-    })
-
-    expect(spy).toHaveBeenCalled()
-    expect(spy).toHaveBeenCalledTimes(3)
-    expect(spy.mock.calls[0][0]).toBe(
-      'Warning: You must pass `type="checkbox"` prop to your Field(checkbox_test) component.\n' +
-        'Without it we don\'t know how to unpack your `value` prop - "checkbox_value".'
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy.mock.calls[0][0]).toBe(
+      'You must pass `type="checkbox"` prop to your Field(checkboxInput) component.\n' +
+        'Without it we don\'t know how to unpack your `value` prop - "checkboxValue".'
     )
-    expect(spy.mock.calls[1][0]).toBe(
-      'Warning: You must pass `type="radio"` prop to your Field(radio_test) component.\n' +
-        'Without it we don\'t know how to unpack your `value` prop - "radio_value".'
+    fireEvent.click(getByTestId('radio'), {
+      target: { type: 'radio', value: 'radio value' }
+    })
+    expect(errorSpy).toHaveBeenCalledTimes(2)
+    expect(errorSpy.mock.calls[1][0]).toBe(
+      'You must pass `type="radio"` prop to your Field(radioInput) component.\n' +
+        'Without it we don\'t know how to unpack your `value` prop - "radioValue".'
     )
-    expect(spy.mock.calls[2][0]).toBe(
-      'Warning: You must pass `type="select"` prop to your Field(select_test) component.\n' +
+    fireEvent.change(getByTestId('select'), {
+      target: { value: ['some value'] }
+    })
+    expect(errorSpy).toHaveBeenCalledTimes(3)
+    expect(errorSpy.mock.calls[2][0]).toBe(
+      'You must pass `type="select"` prop to your Field(selectMultipleInput) component.\n' +
         "Without it we don't know how to unpack your `value` prop - []."
     )
+    fireEvent.change(getByTestId('selectMultipleWithoutRenderProp'), {
+      target: { value: ['some value'] }
+    })
+    // error not given, since we can deduce that it's a "select"
+    expect(errorSpy).toHaveBeenCalledTimes(3)
+    errorSpy.mockRestore()
+  })
 
-    spy.mockRestore()
+  it('should formatOnBlur on submit', () => {
+    const onSubmit = jest.fn()
+    const { getByTestId, getByText } = render(
+      <Form onSubmit={onSubmit}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="name"
+              component="input"
+              format={value => value && value.toUpperCase()}
+              formatOnBlur
+              data-testid="name"
+            />
+            <button type="submit">Submit</button>
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('name').value).toBe('')
+    fireEvent.focus(getByTestId('name'))
+    fireEvent.change(getByTestId('name'), { target: { value: 'erik' } })
+    expect(getByTestId('name').value).toBe('erik')
+    fireEvent.blur(getByTestId('name'))
+    expect(getByTestId('name').value).toBe('ERIK')
+
+    fireEvent.focus(getByTestId('name'))
+    fireEvent.change(getByTestId('name'), { target: { value: 'ERIKras' } })
+    expect(getByTestId('name').value).toBe('ERIKras')
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    fireEvent.click(getByText('Submit'))
+    expect(onSubmit).toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSubmit.mock.calls[0][0]).toEqual({ name: 'ERIKRAS' })
+
+    // submit again with no need for format
+    fireEvent.click(getByText('Submit'))
+    expect(onSubmit).toHaveBeenCalledTimes(2)
+    expect(onSubmit.mock.calls[1][0]).toEqual({ name: 'ERIKRAS' })
+  })
+
+  it('should allow submission to be cancelled in beforeSubmit', () => {
+    const onSubmit = jest.fn()
+    const beforeSubmit = jest.fn(() => false)
+    const { getByTestId, getByText } = render(
+      <Form onSubmit={onSubmit}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="name"
+              component="input"
+              beforeSubmit={beforeSubmit}
+              data-testid="name"
+            />
+            <button type="submit">Submit</button>
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('name').value).toBe('')
+    fireEvent.focus(getByTestId('name'))
+    fireEvent.change(getByTestId('name'), { target: { value: 'erik' } })
+
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(beforeSubmit).not.toHaveBeenCalled()
+    fireEvent.click(getByText('Submit'))
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(beforeSubmit).toHaveBeenCalled()
+  })
+
+  it('update validating flag on async field-level validation', async () => {
+    const { getByTestId } = render(
+      <Form onSubmit={onSubmitMock}>
+        {({ handleSubmit }) => (
+          <form onSubmit={handleSubmit}>
+            <Field
+              name="name"
+              component="input"
+              validate={async value => {
+                await timeout(5)
+                return value === 'erikras' ? 'Username taken' : undefined
+              }}
+              data-testid="name"
+            />
+            <Field name="name" subscription={{ validating: true }}>
+              {({ meta: { validating } }) => (
+                <div data-testid="validating">
+                  {validating === true ? 'Spinner' : 'Not Validating'}
+                </div>
+              )}
+            </Field>
+            <button type="submit">Submit</button>
+          </form>
+        )}
+      </Form>
+    )
+    expect(getByTestId('validating')).toHaveTextContent('Spinner')
+
+    await sleep(6)
+
+    expect(getByTestId('name').value).toBe('')
+    fireEvent.focus(getByTestId('name'))
+    expect(getByTestId('validating')).toHaveTextContent('Not Validating')
+
+    fireEvent.change(getByTestId('name'), { target: { value: 'erik' } })
+    expect(getByTestId('validating')).toHaveTextContent('Spinner')
+
+    await sleep(6)
+
+    expect(getByTestId('validating')).toHaveTextContent('Not Validating')
+
+    fireEvent.change(getByTestId('name'), { target: { value: 'erikras' } })
+    expect(getByTestId('validating')).toHaveTextContent('Spinner')
+
+    await sleep(6)
+
+    expect(getByTestId('validating')).toHaveTextContent('Not Validating')
+  })
+
+  it('not call record-level validation on Field mount', () => {
+    const validate = jest.fn()
+    const { getByText } = render(
+      <Toggle>
+        {showOtherFields => (
+          <Form onSubmit={onSubmitMock} validate={validate}>
+            {({ handleSubmit }) => (
+              <form onSubmit={handleSubmit}>
+                <Field name="firstName" component="input" />
+                <Field name="lastName" component="input" />
+                <Field name="email" component="input" />
+                <Field name="street" component="input" />
+                <Field name="city" component="input" />
+                {showOtherFields && (
+                  <React.Fragment>
+                    <Field name="friend.firstName" component="input" />
+                    <Field name="friend.lastName" component="input" />
+                    <Field name="friend.email" component="input" />
+                    <Field name="friend.street" component="input" />
+                    <Field name="friend.city" component="input" />
+                  </React.Fragment>
+                )}
+              </form>
+            )}
+          </Form>
+        )}
+      </Toggle>
+    )
+    expect(validate).toHaveBeenCalledTimes(1)
+    fireEvent.click(getByText('Toggle'))
+    expect(validate).toHaveBeenCalledTimes(1)
+  })
+
+  it('submit should not throw when field with enabled `formatOnBlur` changes name `prop`', () => {
+    const onSubmit = jest.fn()
+
+    const trim = value => value && value.trim()
+
+    const { getByTestId, getByText } = render(
+      <Form onSubmit={onSubmit}>
+        {({ handleSubmit }) => (
+          <Toggle>
+            {newFieldName => (
+              <form onSubmit={handleSubmit}>
+                <Field
+                  name={newFieldName ? 'newName' : 'oldName'}
+                  component="input"
+                  formatOnBlur={true}
+                  format={trim}
+                  data-testid="field"
+                />
+                <button type="submit">Submit</button>
+              </form>
+            )}
+          </Toggle>
+        )}
+      </Form>
+    )
+
+    fireEvent.click(getByText('Toggle'))
+    fireEvent.change(getByTestId('field'), {
+      target: { value: 'trailing space ' }
+    })
+    fireEvent.click(getByText('Submit'))
+    expect(onSubmit).toHaveBeenCalled()
+    expect(onSubmit.mock.calls[0][0]).toEqual({ newName: 'trailing space' })
+  })
+
+  it('should throw an error if name prop is undefined', () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {})
+
+    const errorSpy = jest.fn()
+    render(
+      <ErrorBoundary spy={errorSpy}>
+        <Form onSubmit={onSubmitMock}>
+          {() => <Field name={undefined} render={() => <input />} />}
+        </Form>
+      </ErrorBoundary>
+    )
+
+    expect(errorSpy).toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy.mock.calls[0][0].message).toBe(
+      'prop name cannot be undefined in <Field> component'
+    )
+    console.error.mockRestore()
   })
 })

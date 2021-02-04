@@ -52,7 +52,7 @@ module.exports = {
       andTest: series.nps('build', 'test.size')
     },
     copyTypes: series(
-      npsUtils.copy('src/*.js.flow src/*.d.ts dist'),
+      npsUtils.copy('src/*.js.flow dist'),
       npsUtils.copy(
         'dist/index.js.flow dist --rename="react-final-form.cjs.js.flow"'
       ),
@@ -73,15 +73,20 @@ module.exports = {
       script: 'flow check'
     },
     typescript: {
-      description: 'typescript check the entire project',
-      script: 'tsc'
+      default: {
+        description: 'typescript',
+        script:
+          'dtslint --localTs ./node_modules/typescript/lib --expectOnly ./typescript'
+      }
     },
     validate: {
       description:
         'This runs several scripts to make sure things look good before committing or on clean install',
       default: concurrent.nps(
         'lint',
-        'flow',
+        // Flow has been causing headaches in this lib for years.
+        // Disabling now to ship some features. -@erikras, 2020-04-19
+        // 'flow',
         'typescript',
         'build.andTest',
         'test'

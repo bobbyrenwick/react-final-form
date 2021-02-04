@@ -1,10 +1,18 @@
 import resolve from 'rollup-plugin-node-resolve'
 import babel from 'rollup-plugin-babel'
-import flow from 'rollup-plugin-flow'
 import commonjs from 'rollup-plugin-commonjs'
-import uglify from 'rollup-plugin-uglify'
+import json from 'rollup-plugin-json'
+import { uglify } from 'rollup-plugin-uglify'
 import replace from 'rollup-plugin-replace'
 import pkg from './package.json'
+
+const makeExternalPredicate = externalArr => {
+  if (externalArr.length === 0) {
+    return () => false
+  }
+  const pattern = new RegExp(`^(${externalArr.join('|')})($|/)`)
+  return id => pattern.test(id)
+}
 
 const minify = process.env.MINIFY
 const format = process.env.FORMAT
@@ -41,27 +49,27 @@ export default {
       exports: 'named',
       globals: {
         react: 'React',
-        'prop-types': 'PropTypes',
         'final-form': 'FinalForm'
       }
     },
     output
   ),
-  external: umd
-    ? Object.keys(pkg.peerDependencies || {})
-    : [
-      ...Object.keys(pkg.dependencies || {}),
-      ...Object.keys(pkg.peerDependencies || {}),
-    ],
+  external: makeExternalPredicate(
+    umd
+      ? Object.keys(pkg.peerDependencies || {})
+      : [
+          ...Object.keys(pkg.dependencies || {}),
+          ...Object.keys(pkg.peerDependencies || {})
+        ]
+  ),
   plugins: [
-    resolve({ jsnext: true, main: true }),
-    flow(),
+    resolve({ mainFields: ['jsnext:main'] }),
+    json(),
     commonjs({ include: 'node_modules/**' }),
     babel({
       exclude: 'node_modules/**',
-      babelrc: false,
-      presets: [['env', { loose: true, modules: false }], 'stage-2'],
-      plugins: ['external-helpers']
+      plugins: [['@babel/plugin-transform-runtime', { useESModules: !cjs }]],
+      runtimeHelpers: true
     }),
     umd
       ? replace({

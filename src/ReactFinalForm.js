@@ -1,6 +1,5 @@
 // @flow
 import * as React from 'react'
-import PropTypes from 'prop-types'
 import {
   createForm,
   formSubscriptionItems,
@@ -11,13 +10,22 @@ import type {
   Config,
   FormSubscription,
   FormState,
+  FormValuesShape,
   Unsubscribe
 } from 'final-form'
-import type { FormProps as Props, ReactContext } from './types'
-import shallowEqual from './shallowEqual'
+import type { FormProps as Props, SubmitEvent } from './types'
 import renderComponent from './renderComponent'
+import useWhenValueChanges from './useWhenValueChanges'
+import useConstant from './useConstant'
+import shallowEqual from './shallowEqual'
+import isSyntheticEvent from './isSyntheticEvent'
 import type { FormRenderProps } from './types.js.flow'
-export const version = '3.4.2'
+import ReactFinalFormContext from './context'
+import useLatest from './useLatest'
+import { version } from '../package.json'
+import { addLazyFormState } from './getters'
+
+export { version }
 
 const versions = {
   'final-form': ffVersion,
@@ -32,256 +40,170 @@ export const all: FormSubscription = formSubscriptionItems.reduce(
   {}
 )
 
-type State = {
-  state: FormState
-}
-
-export default class ReactFinalForm extends React.Component<Props, State> {
-  context: ReactContext
-  props: Props
-  state: State
-  form: FormApi
-  mounted: boolean
-  resumeValidation: ?boolean
-  unsubscriptions: Unsubscribe[]
-
-  static childContextTypes = {
-    reactFinalForm: PropTypes.object
+function ReactFinalForm<FormValues: FormValuesShape>({
+  debug,
+  decorators,
+  destroyOnUnregister,
+  form: alternateFormApi,
+  initialValues,
+  initialValuesEqual,
+  keepDirtyOnReinitialize,
+  mutators,
+  onSubmit,
+  subscription = all,
+  validate,
+  validateOnBlur,
+  ...rest
+}: Props<FormValues>) {
+  const config: Config<FormValues> = {
+    debug,
+    destroyOnUnregister,
+    initialValues,
+    keepDirtyOnReinitialize,
+    mutators,
+    onSubmit,
+    validate,
+    validateOnBlur
   }
 
-  constructor(props: Props) {
-    super(props)
-    const {
-      debug,
-      decorators,
-      initialValues,
-      mutators,
-      onSubmit,
-      subscription,
-      validate,
-      validateOnBlur
-    } = props
-    const config: Config = {
-      debug,
-      initialValues,
-      mutators,
-      onSubmit,
-      validate,
-      validateOnBlur
-    }
-    this.mounted = false
-    try {
-      this.form = createForm(config)
-    } catch (e) {
-      // istanbul ignore next
-      if (process.env.NODE_ENV !== 'production') {
-        console.error(`Warning: ${e.message}`)
-      }
-    }
-    this.unsubscriptions = []
-    if (this.form) {
-      // set initial state
-      let initialState: FormState = {}
-      this.form.subscribe((state: FormState) => {
+  const form: FormApi<FormValues> = useConstant(() => {
+    const f = alternateFormApi || createForm<FormValues>(config)
+    // pause validation until children register all fields on first render (unpaused in useEffect() below)
+    f.pauseValidation()
+    return f
+  })
+
+  // synchronously register and unregister to query form state for our subscription on first render
+  const [state, setState] = React.useState<FormState<FormValues>>(
+    (): FormState<FormValues> => {
+      let initialState: FormState<FormValues> = {}
+      form.subscribe(state => {
         initialState = state
-      }, subscription || all)()
-      this.state = { state: initialState }
+      }, subscription)()
+      return initialState
     }
-    if (decorators) {
-      decorators.forEach(decorator => {
-        this.unsubscriptions.push(decorator(this.form))
-      })
-    }
-  }
+  )
 
-  getChildContext() {
-    return {
-      reactFinalForm: this.form
-    }
-  }
+  // save a copy of state that can break through the closure
+  // on the shallowEqual() line below.
+  const stateRef = useLatest<FormState<FormValues>>(state)
 
-  notify = (state: FormState) => {
-    if (this.mounted) {
-      this.setState({ state })
-    }
-    this.mounted = true
-  }
-
-  handleSubmit = (event: ?SyntheticEvent<HTMLFormElement>) => {
-    if (event && typeof event.preventDefault === 'function') {
-      // sometimes not true, e.g. React Native
-      event.preventDefault()
-    }
-    return this.form.submit()
-  }
-
-  componentWillMount() {
-    if (this.form) {
-      this.form.pauseValidation()
-    }
-  }
-
-  componentDidMount() {
-    if (this.form) {
-      this.unsubscriptions.push(
-        this.form.subscribe(this.notify, this.props.subscription || all)
-      )
-      this.form.resumeValidation()
-    }
-  }
-
-  componentWillUpdate() {
-    if (this.form) {
-      this.resumeValidation = !this.form.isValidationPaused()
-      this.form.pauseValidation()
-    }
-  }
-
-  componentDidUpdate() {
-    if (this.form && this.resumeValidation) {
-      this.form.resumeValidation()
-    }
-  }
-
-  componentWillReceiveProps(nextProps: Props) {
-    if (
-      nextProps.initialValues &&
-      !shallowEqual(this.props.initialValues, nextProps.initialValues)
-    ) {
-      this.form.initialize(nextProps.initialValues)
-    }
-    ;['debug', 'mutators', 'onSubmit', 'validate', 'validateOnBlur'].forEach(
-      key => {
-        if (this.props[key] === nextProps[key]) {
-          return
+  React.useEffect(() => {
+    // We have rendered, so all fields are now registered, so we can unpause validation
+    form.isValidationPaused() && form.resumeValidation()
+    const unsubscriptions: Unsubscribe[] = [
+      form.subscribe(s => {
+        if (!shallowEqual(s, stateRef.current)) {
+          setState(s)
         }
-        this.form.setConfig(key, nextProps[key])
-      }
-    )
-    // istanbul ignore next
-    if (process.env.NODE_ENV !== 'production') {
-      if (!shallowEqual(this.props.decorators, nextProps.decorators)) {
-        console.error(
-          'Warning: Form decorators should not change from one render to the next as new values will be ignored'
-        )
-      }
-      if (!shallowEqual(this.props.subscription, nextProps.subscription)) {
-        console.error(
-          'Warning: Form subscription should not change from one render to the next as new values will be ignored'
-        )
-      }
-    }
-  }
-
-  componentWillUnmount() {
-    this.unsubscriptions.forEach(unsubscribe => unsubscribe())
-  }
-
-  render() {
-    // remove config props
-    const {
-      debug,
-      initialValues,
-      mutators,
-      onSubmit,
-      subscription,
-      validate,
-      validateOnBlur,
-      ...props
-    } = this.props
-    const renderProps: FormRenderProps = {
-      // assign to force Flow check
-      ...(this.state ? this.state.state : {}),
-      batch:
-        this.form &&
-        ((fn: () => void) => {
-          // istanbul ignore next
-          if (process.env.NODE_ENV !== 'production') {
-            console.error(
-              `Warning: As of React Final Form v3.3.0, props.batch() is deprecated and will be removed in the next major version of React Final Form. Use: props.form.batch() instead. Check your ReactFinalForm render prop.`
-            )
-          }
-          return this.form.batch(fn)
-        }),
-      blur:
-        this.form &&
-        ((name: string) => {
-          // istanbul ignore next
-          if (process.env.NODE_ENV !== 'production') {
-            console.error(
-              `Warning: As of React Final Form v3.3.0, props.blur() is deprecated and will be removed in the next major version of React Final Form. Use: props.form.blur() instead. Check your ReactFinalForm render prop.`
-            )
-          }
-          return this.form.blur(name)
-        }),
-      change:
-        this.form &&
-        ((name: string, value: any) => {
-          // istanbul ignore next
-          if (process.env.NODE_ENV !== 'production') {
-            console.error(
-              `Warning: As of React Final Form v3.3.0, props.change() is deprecated and will be removed in the next major version of React Final Form. Use: props.form.change() instead. Check your ReactFinalForm render prop.`
-            )
-          }
-          return this.form.change(name, value)
-        }),
-      focus:
-        this.form &&
-        ((name: string) => {
-          // istanbul ignore next
-          if (process.env.NODE_ENV !== 'production') {
-            console.error(
-              `Warning: As of React Final Form v3.3.0, props.focus() is deprecated and will be removed in the next major version of React Final Form. Use: props.form.focus() instead. Check your ReactFinalForm render prop.`
-            )
-          }
-          return this.form.focus(name)
-        }),
-      form: this.form,
-      handleSubmit: this.handleSubmit,
-      initialize:
-        this.form &&
-        ((values: Object) => {
-          // istanbul ignore next
-          if (process.env.NODE_ENV !== 'production') {
-            console.error(
-              `Warning: As of React Final Form v3.3.0, props.initialize() is deprecated and will be removed in the next major version of React Final Form. Use: props.form.initialize() instead. Check your ReactFinalForm render prop.`
-            )
-          }
-          return this.form.initialize(values)
-        }),
-      mutators:
-        this.form &&
-        Object.keys(this.form.mutators).reduce((result, key) => {
-          result[key] = (...args) => {
-            this.form.mutators[key](...args)
+      }, subscription),
+      ...(decorators
+        ? decorators.map(decorator =>
+            // this noop ternary is to appease the flow gods
             // istanbul ignore next
-            if (process.env.NODE_ENV !== 'production') {
-              console.error(
-                `Warning: As of React Final Form v3.3.0, props.mutators is deprecated and will be removed in the next major version of React Final Form. Use: props.form.mutators instead. Check your ReactFinalForm render prop.`
-              )
-            }
-          }
-          return result
-        }, {}),
-      reset:
-        this.form &&
-        ((values?: Object) => {
-          // istanbul ignore next
-          if (process.env.NODE_ENV !== 'production') {
-            console.error(
-              `Warning: As of React Final Form v3.3.0, props.reset() is deprecated and will be removed in the next major version of React Final Form. Use: props.form.reset() instead. Check your ReactFinalForm render prop.`
-            )
-          }
-          return this.form.reset(values)
-        })
+            decorator(form)
+          )
+        : [])
+    ]
+
+    return () => {
+      form.pauseValidation() // pause validation so we don't revalidate on every field deregistration
+      unsubscriptions.reverse().forEach(unsubscribe => unsubscribe())
+      // don't need to resume validation here; either unmounting, or will re-run this hook with new deps
     }
-    return renderComponent(
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, decorators)
+
+  // warn about decorator changes
+  // istanbul ignore next
+  if (process.env.NODE_ENV !== 'production') {
+    // You're never supposed to use hooks inside a conditional, but in this
+    // case we can be certain that you're not going to be changing your
+    // NODE_ENV between renders, so this is safe.
+
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useWhenValueChanges(
+      decorators,
+      () => {
+        console.error(
+          'Form decorators should not change from one render to the next as new values will be ignored'
+        )
+      },
+      shallowEqual
+    )
+  }
+
+  // allow updatable config
+  useWhenValueChanges(debug, () => {
+    form.setConfig('debug', debug)
+  })
+  useWhenValueChanges(destroyOnUnregister, () => {
+    form.destroyOnUnregister = !!destroyOnUnregister
+  })
+  useWhenValueChanges(keepDirtyOnReinitialize, () => {
+    form.setConfig('keepDirtyOnReinitialize', keepDirtyOnReinitialize)
+  })
+  useWhenValueChanges(
+    initialValues,
+    () => {
+      form.setConfig('initialValues', initialValues)
+    },
+    initialValuesEqual || shallowEqual
+  )
+  useWhenValueChanges(mutators, () => {
+    form.setConfig('mutators', mutators)
+  })
+  useWhenValueChanges(onSubmit, () => {
+    form.setConfig('onSubmit', onSubmit)
+  })
+  useWhenValueChanges(validate, () => {
+    form.setConfig('validate', validate)
+  })
+  useWhenValueChanges(validateOnBlur, () => {
+    form.setConfig('validateOnBlur', validateOnBlur)
+  })
+
+  const handleSubmit = (event: ?SubmitEvent) => {
+    if (event) {
+      // sometimes not true, e.g. React Native
+      if (typeof event.preventDefault === 'function') {
+        event.preventDefault()
+      }
+      if (typeof event.stopPropagation === 'function') {
+        // prevent any outer forms from receiving the event too
+        event.stopPropagation()
+      }
+    }
+    return form.submit()
+  }
+
+  const renderProps: FormRenderProps<FormValues> = {
+    form: {
+      ...form,
+      reset: eventOrValues => {
+        if (isSyntheticEvent(eventOrValues)) {
+          // it's a React SyntheticEvent, call reset with no arguments
+          form.reset()
+        } else {
+          form.reset(eventOrValues)
+        }
+      }
+    },
+    handleSubmit
+  }
+  addLazyFormState(renderProps, state)
+  return React.createElement(
+    ReactFinalFormContext.Provider,
+    { value: form },
+    renderComponent(
       {
-        ...props,
-        ...renderProps,
+        ...rest,
         __versions: versions
       },
+      renderProps,
       'ReactFinalForm'
     )
-  }
+  )
 }
+
+export default ReactFinalForm
